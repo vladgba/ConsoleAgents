@@ -186,6 +186,8 @@ class _Output:
 
     def flush(self):
         with self.owner.lock:
+            # A flush from the log tailer can end in the middle of a line. Keep
+            # that fragment buffered rather than turning it into a fake newline.
             self.stream.flush()
 
     def __getattr__(self, name):
@@ -204,6 +206,7 @@ class PinnedStatus:
         self.header_rows = 1
         self.status = "P:? Usage ?"
         self.history = []
+        self.pending_output = {}
         self.prompt, self.text, self.cursor = "", "", 0
 
     def __enter__(self):
@@ -280,14 +283,25 @@ class PinnedStatus:
     def write(self, text, stream):
         with self.lock:
             if self.editing and text:
+                data = self.pending_output.get(stream, "") + text
+                end = data.rfind("\n") + 1
+                self.pending_output[stream] = data[end:]
+                if not end:
+                    return len(text)
                 self.stdout.write("\r\033[2K")
-                stream.write(text)
-                if not text.endswith("\n"):
-                    self.stdout.write("\n")
+                stream.write(data[:end])
                 self.render_input()
                 self.stdout.flush()
                 return len(text)
             return stream.write(text)
+
+    def flush_pending(self):
+        """Finish partial log lines before leaving the editor or closing the UI."""
+        for stream, text in self.pending_output.items():
+            if text:
+                stream.write(text + "\n")
+                stream.flush()
+        self.pending_output.clear()
 
     def render_input(self):
         width = max(1, self.size.columns - 1)
@@ -360,6 +374,13 @@ class PinnedStatus:
             finally:
                 with self.lock:
                     self.editing = False
+                    self.stdout.write("\r\033[2K")
+                    self.flush_pending()
+                    # The editor may have scrolled horizontally or left the
+                    # cursor in the middle of the draft. Echo the complete line
+                    # once, so the chat history retains what the user submitted.
+                    message = self.prompt.strip("\n") + self.text
+                    self.stdout.write("\n".join(wrap_ansi(message, max(1, self.size.columns - 1))))
                     self.stdout.write("\033[?2004l\033[0m\n")
                     self.stdout.flush()
 
@@ -369,6 +390,7 @@ class PinnedStatus:
             if self.active:
                 self.active = False
                 try:
+                    self.flush_pending()
                     clear = "".join(f"\033[{row + 1};1H\033[2K" for row in range(self.header_rows))
                     self.stdout.write("\0337\033[r" + clear + "\0338\033[?2004l\033[0m")
                     self.stdout.flush()

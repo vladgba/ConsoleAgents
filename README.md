@@ -164,7 +164,9 @@ A percentage followed by `?` means the other window is unknown; `-` means both w
 Unknown usage is never presented as 0%. The header reloads local data every three seconds; use
 `/u refresh` for a new account check. It uses up to three rows to fit narrow screens; `/u` shows all agents.
 
-While the header is enabled, typing survives background output. Arrow keys, Home/End, Delete,
+While the header is enabled, typing survives background output. Incoming output fragments are
+joined into complete lines before redrawing your draft, preserving its cursor position.
+Submitting a long draft shows the full message in the console history. Arrow keys, Home/End, Delete,
 Backspace and session-only history work; long input scrolls horizontally. Bracketed multiline paste
 becomes a single message. Ctrl+C leaves a chat or exits from home, and terminal settings are restored.
 Turn progress prefixes are only a vendor-colored elapsed time such as `0:03`, without names or brackets.

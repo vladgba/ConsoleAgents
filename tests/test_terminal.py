@@ -171,3 +171,50 @@ class TerminalTests(unittest.TestCase):
                 self.assertIn('GPT 100%*?', output.getvalue())
                 self.assertEqual(display.header_rows, 2)
                 self.assertIn('\033[3;12r', output.getvalue())
+
+    def test_fragmented_updates_redraw_only_after_complete_lines(self):
+        for module in self.modules():
+            with self.subTest(package=module.__name__), self.display(module) as (display, output, _, _):
+                display.editing = True
+                display.prompt, display.text, display.cursor = 'ca> ', 'my draft', 3
+                before = output.getvalue()
+                module.sys.stdout.write('first')
+                module.sys.stdout.flush()
+                self.assertEqual(output.getvalue(), before)
+                module.sys.stdout.write(' message\nsecond')
+                update = output.getvalue()[len(before):]
+                self.assertIn('first message\n', update)
+                self.assertNotIn('first\n', update)
+                self.assertNotIn('second', update)
+                self.assertEqual((display.text, display.cursor), ('my draft', 3))
+                before = len(output.getvalue())
+                module.sys.stdout.write(' message\n')
+                self.assertIn('second message\n', output.getvalue()[before:])
+                self.assertEqual((display.text, display.cursor), ('my draft', 3))
+                display.editing = False
+
+    def test_long_submitted_draft_and_pending_output_are_kept_in_history(self):
+        for module in self.modules():
+            with self.subTest(package=module.__name__), self.display(module) as (display, output, _, _):
+                draft = 'A' * 80 + 'THE_END'
+                keys = iter([*draft, 'HOME', 'X', '\r'])
+
+                def read():
+                    key = next(keys)
+                    if key == '\r':
+                        module.sys.stdout.write('last partial update')
+                        output.seek(0)
+                        output.truncate()  # inspect the committed draft, not intermediate redraws
+                    return key
+
+                @contextmanager
+                def reader():
+                    yield read
+
+                with patch.object(module, 'key_reader', reader):
+                    self.assertEqual(display.input('ca> '), 'X' + draft)
+                committed = module.ANSI.sub('', output.getvalue()).replace('\n', '').replace('\r', '')
+                self.assertIn('last partial update', committed)
+                self.assertIn('ca> X' + draft, committed)
+                self.assertEqual(display.history, ['X' + draft])
+                self.assertFalse(display.pending_output)
