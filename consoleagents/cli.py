@@ -1050,6 +1050,9 @@ def cmd_project(args, ui: UI) -> int:
                 root = Path(args.path).expanduser().resolve() if args.path else Path.cwd().resolve()
             reg.add(args.name, root, args.description or "")
             ui.ok(f"Project {args.name!r} -> {root}")
+            if args.use:
+                reg.use(args.name)
+                ui.ok(f"Current project: {args.name} ({root})")
         elif action == "use":
             if not args.name:
                 raise SystemExit("Usage: aa project use <name>")
@@ -1301,6 +1304,7 @@ def build_parser() -> argparse.ArgumentParser:
                                             "new name for rename")
     sp.add_argument("dir", nargs="?", help="add <name> <git-url> <folder>: where to clone")
     sp.add_argument("-d", "--description")
+    sp.add_argument("--use", action="store_true", help="switch to the project after adding it")
     sp.set_defaults(func=cmd_project)
 
     sp = sub.add_parser("memory", aliases=["mem", "m"], help="project and global memory")

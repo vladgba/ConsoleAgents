@@ -361,7 +361,8 @@ class Session:
             return
         if background and cli.LAST_CHAT.get("chat"):
             self.attach(ProjectState(cli.LAST_CHAT["root"], cli.LAST_CHAT["chat"]), history_lines=0)
-        if args.func is cli.cmd_project and args.action == "use":
+        if args.func is cli.cmd_project and (args.action == "use" or
+                                             (args.action == "add" and args.use)):
             self.detach()
             self.root = Path(Registry().get(args.name)["path"])
             self.overview()

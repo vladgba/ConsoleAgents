@@ -1120,6 +1120,21 @@ class Chats(TempCase):
         self.assertIn("Unknown command /tsak. Did you mean /task", out.getvalue())
         self.assertNotIn("usage: aa", out.getvalue())
 
+    def test_project_add_and_switch(self):
+        from autoagents.registry import Registry
+        from autoagents.shell import Session
+        from consoleagents.shell import Session as ConsoleSession
+        for index, session_type in enumerate((Session, ConsoleSession)):
+            target = self.dir / f"new project {index}"
+            target.mkdir()
+            session = session_type(self.project, UI(quiet=True))
+            session.handle(f'/p add fresh{index} "{target}" --use')
+            self.assertEqual(session.root, target.resolve())
+            self.assertEqual(Registry().current(), f"fresh{index}")
+            session.handle(f'/p add stay{index} "{target / 'missing'}" --use')
+            self.assertEqual(session.root, target.resolve())
+            self.assertEqual(Registry().current(), f"fresh{index}")
+
     def test_shell_quoted_windows_path(self):
         from autoagents.registry import Registry
         from autoagents.shell import Session
