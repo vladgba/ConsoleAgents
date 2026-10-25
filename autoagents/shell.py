@@ -20,6 +20,7 @@ from . import cli
 from .project import ProjectState
 from .registry import Registry, same_path
 from .ui import UI, c
+from .terminal import PinnedStatus
 
 HELP = """In the shell (short forms in brackets):
   <task>                    at home: start a new chat for it, in the background, and open it
@@ -228,6 +229,7 @@ class Session:
         self.attached: ProjectState | None = None
         self.tailer: Tailer | None = None
         self.parser = cli.build_parser()
+        self.terminal = None
 
     # -- helpers ------------------------------------------------------------------------------
     def project_label(self) -> str:
@@ -500,7 +502,7 @@ class Session:
     def loop(self) -> int:
         while True:
             try:
-                line = input(self.prompt())
+                line = self.terminal.input(self.prompt()) if self.terminal else input(self.prompt())
             except EOFError:
                 return self.quit()
             except KeyboardInterrupt:
@@ -531,21 +533,25 @@ def shell(base_args, ui: UI) -> int:
     from . import power
     if power.armed() and not power.state().get("triggered_at"):
         power.disarm()  # /swf belongs to a console session: a new shell always starts with it off
-    notifier = Notifier(session)
-    notifier.start()
-    try:
-        return session.loop()
-    finally:
-        notifier.stop()
-        session.detach(quiet=True)
+    with PinnedStatus(session) as terminal:
+        session.terminal = terminal
+        notifier = Notifier(session)
+        notifier.start()
+        try:
+            return session.loop()
+        finally:
+            notifier.stop()
+            session.detach(quiet=True)
 
 
 def attach_standalone(state: ProjectState, ui: UI) -> int:
     """`aa open`: watch one chat and type into it; Ctrl+C or /back ends it (the chat keeps working)."""
     ui.in_shell = True
     session = Session(state.root, ui, standalone=True)
-    session.attach(state)
-    try:
-        return session.loop()
-    finally:
-        session.detach(quiet=True)
+    with PinnedStatus(session) as terminal:
+        session.terminal = terminal
+        try:
+            session.attach(state)
+            return session.loop()
+        finally:
+            session.detach(quiet=True)
