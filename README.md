@@ -33,6 +33,8 @@ On macOS/Linux, use the `ca` shell script instead, or run `python ca.py`.
 | `ca usage refresh [agent]` (`u refresh`) | force account quota checks for enabled agents, or one named agent; shell: `/usage refresh [agent]` |
 | `ca u set codex 70 [--window weekly] [--resets 2h]` | tell the balancer how full an agent is |
 | `ca u clear antigravity` | clear a cooldown (e.g. after you logged in again) |
+| `ca update [--check] [-y]` | check or update this app from its GitHub remote; shell: `/update` |
+| `ca rollback [ref] [--list]` (`revert`) | choose a saved version to restore; shell: `/rollback` or `/revert` |
 | `ca agents` (`a`) | which CLIs were found |
 | `ca project [list\|add\|use\|rename\|remove\|info]` (`p`) | your projects (see below) |
 | `ca memory [add "text" [-g] \| rm p3 \| clear]` (`m`) | what the agents remember, per project and global |
@@ -139,7 +141,43 @@ ca demo> /open 4                                     <- back in, with its recent
 
 Shell commands: `/new <task>` (`/n`, takes `--agent`, `--no-plan`...), `/open <n|proj#n>` (`/o`), `/back` (`/b`),
 `/chats [all]` (`/ls`), `/continue [msg]` (`/c`), `/stop [n]` (`/x`), `/s /rd /l /u /a /p /m /st`, `/cd <dir>`,
-`/help`, `/quit`. Any `ca ...` command line works in the shell too.
+`/update [--check]`, `/rollback [ref]` (`/revert`), `/help`, `/quit`. Any `ca ...` command line works in the shell too.
+
+## Update the app and recover a previous version
+
+From the shell, run `/update --check` to fetch and display incoming commits, then `/update`
+to confirm and apply a fast-forward update from the installation's GitHub remote.
+These commands update the ConsoleAgents installation, regardless of your selected project.
+Git and a Git clone with a configured remote are required; commit or stash local edits first.
+
+```text
+/update --check
+/update
+/rollback --list
+/rollback
+/revert 1
+```
+
+`/rollback` opens a small checkpoint table with dates, commits and summaries. Choose a number
+(1 is newest) and confirm with `y`, or enter `q` to cancel. `/revert` is an alias.
+Each update and rollback records the previous commit in `.autoagents/update_history.json`.
+Checkpoints preserve committed versions, not uncommitted edits. Rollback resets the installation's
+current branch and tracked files to the selected commit. `--allow-dirty` bypasses the local-edit
+guard and can discard edits during rollback.
+
+After changing versions, exit and restart `ca` to load the changed code. Stop active chats before
+changing the installation so background agents do not run across versions.
+If the shell cannot open after an update, use the standalone fallback from a terminal:
+
+```bash
+ca rollback --list
+ca rollback                 # select a checkpoint and confirm
+ca rollback 1 -y            # restore newest checkpoint without prompts
+python /path/to/ConsoleAgents/ca.py rollback  # if ca is not on PATH
+```
+
+The fallback uses the same Python package, so Python and the CLI must still be able to start.
+See [COMMANDS.md](COMMANDS.md#315-app-updates-and-rollback) for all options.
 
 ## Shut down when finished (`/swf`, `/qqq`)
 

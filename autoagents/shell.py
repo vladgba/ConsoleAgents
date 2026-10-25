@@ -40,6 +40,8 @@ HELP = """In the shell (short forms in brackets):
   /project [use <n|name>]   (/p)   your projects (numbered); /p 2 or /p shop switches
   /memory [add "text" [-g] | rm p3]   (/m)
   /settings [set <key> <value> [-g]]  (/st)
+  /update [--check] [-y]    update ConsoleAgents from GitHub (installation repository)
+  /rollback [ref] [--list]  (/revert) choose a checkpoint to restore
   /swf   /qqq               shut down when finished: on (lock phone screens, power off PC) / off
   /cd <dir>   /help (/?)   /quit (/q)
   aa <command> ...          any command-line command works too"""
@@ -91,6 +93,7 @@ QUICK = [
     ("/rm <n>", "delete chat"), ("/ps", "agent processes"), ("/k <pid>", "kill process"),
     ("/s", "chat status"), ("/u", "agent usage"),
     ("/p [n]", "projects / switch"), ("/m", "memory"), ("/st", "settings"),
+    ("/update", "update app"), ("/rollback", "restore app"), ("/revert", "restore app (alias)"),
     ("/swf", "off when all done"), ("/qqq", "cancel that"), ("/help", "all commands"), ("/q", "quit"),
 ]
 
@@ -337,6 +340,10 @@ class Session:
         if background:
             args.bg = True
             cli.LAST_CHAT.clear()
+        if args.func is cli.cmd_update and not args.rollback:
+            self.ui.info("Checking ConsoleAgents updates from the installation repository…")
+        elif args.func in (cli.cmd_update, cli.cmd_rollback):
+            self.ui.info("Loading ConsoleAgents rollback checkpoints…")
         try:
             args.func(args, self.ui)
         except SystemExit as exc:

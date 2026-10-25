@@ -476,6 +476,51 @@ ca rm [chat_refs...] [options]
 
 ---
 
+### 3.15 App Updates and Rollback
+
+Updates affect the ConsoleAgents installation repository, independent of `-C`, `-P` or the
+open chat. Requires Git, a Git clone, a configured remote (normally GitHub `origin`) and
+network access for updates. Stop active chats and commit or stash installation edits first.
+
+```bash
+ca update --check             # fetch and show incoming commits without applying them
+ca update                     # display changes and ask before applying
+ca update -y                  # apply without confirmation
+ca update --target v1.2.0      # check out a specific available ref/tag/commit
+ca rollback --list            # list checkpoints, newest first
+ca rollback                   # interactive table, selection, then confirmation
+ca revert 1                   # restore checkpoint 1, with confirmation
+ca rollback <commit> -y        # restore an explicit local commit without prompts
+ca update --rollback          # open the same rollback interface
+```
+
+`update` aliases: `up`, `upgrade`. `rollback` aliases: `revert`, `rb`.
+The shell accepts the same options with a slash: `/update --check`, `/update -y`,
+`/rollback --list`, `/rollback`, `/revert 1`.
+
+| Command | Options | Meaning |
+|---|---|---|
+| `update` | `--check`, `-c` | Fetch and inspect updates only |
+| `update` | `--target <ref>` | Check out an available ref instead of pulling; a tag or commit can leave HEAD detached, requiring a branch checkout before later updates |
+| `update` | `--rollback`, `-r` | Use the rollback interface; `--target <ref>` selects its target |
+| `rollback` | `[checkpoint_ref]` or `--target <ref>` | Checkpoint number (1 = newest) or local Git ref/commit |
+| `rollback` | `--list`, `-l` | Show checkpoint dates, commits, actions and summaries |
+| Both | `--yes`, `-y` | Skip confirmation; rollback without a target chooses the newest checkpoint |
+| Both | `--allow-dirty` | Bypass the tracked local-edit guard; rollback can discard uncommitted edits |
+
+Normal updates use `git pull --ff-only`, refusing divergent history. Each update and rollback
+saves the previous committed version in `.autoagents/update_history.json` (up to 50 entries).
+The interactive rollback table accepts a checkpoint number, or `q`/empty input to cancel,
+then requires `y` to restore it. Rollback needs no network: it resets the current branch and
+tracked files to a locally available commit. Checkpoints do not back up uncommitted edits.
+Restart `ca` after changing versions to load the new code.
+
+If the shell fails to open, run `ca rollback` directly in a terminal, or
+`python /path/to/ConsoleAgents/ca.py rollback` when the launcher is unavailable.
+This fallback still requires a working Python interpreter and CLI package.
+
+---
+
 ## 4. Interactive Shell Slash Commands
 
 When running inside the interactive `ca` console shell, the following commands are available:
@@ -503,6 +548,8 @@ When running inside the interactive `ca` console shell, the following commands a
 | `/agents` (`/a`) | `ca agents` | View agent availability |
 | `/project [use <n\|name>]` (`/p`) | `ca project ...` | Switch or list projects |
 | `/memory [add ... \| rm ...]` (`/m`) | `ca memory ...` | Manage memory entries |
+| `/update [--check] [-y]` | `ca update ...` | Check or update the app from GitHub |
+| `/rollback [ref] [--list]` (`/revert`, `/rb`) | `ca rollback ...` | Choose and restore a saved app version |
 | `/settings [set ...]` (`/st`) | `ca settings ...` | Adjust settings |
 | `/swf` / `/qqq` | `ca swf` / `ca qqq` | Toggle shut-down-when-finished |
 | `/cd <dir>` | - | Change working directory inside shell |
