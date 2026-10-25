@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime and local state
+.autoagents/
+.consoleagents/
+.agentsroom/
+.claude/
+.mcp.json
+*.local.json
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
