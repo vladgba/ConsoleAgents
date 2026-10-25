@@ -143,6 +143,41 @@ Shell commands: `/new <task>` (`/n`, takes `--agent`, `--no-plan`...), `/open <n
 `/chats [all]` (`/ls`), `/continue [msg]` (`/c`), `/stop [n]` (`/x`), `/s /rd /l /u /a /p /m /st`, `/cd <dir>`,
 `/update [--check]`, `/rollback [ref]` (`/revert`), `/help`, `/quit`. Any `ca ...` command line works in the shell too.
 
+## Small screens and the pinned status header
+
+The layout adapts to terminal width. On screens narrower than 81 columns, usage becomes
+percentages, chat/process lists hide secondary columns, and long rows wrap into readable blocks.
+Use `/ls --details`, `/ps --details` or `/u show codex` to see the additional fields.
+The display names are **Claude** (orange), **Gemini** (blue, `antigravity`) and **GPT** (gray, `codex`).
+Command arguments still use `claude`, `antigravity` and `codex`.
+
+Interactive ANSI terminals get a pinned header, including when opening a chat with `ca open`:
+
+```text
+P:3 Claude 42% · GPT 8%~ · Gemini ?
+```
+
+`P:3` counts unique live processes tracked across your registered projects and the current project,
+including agent CLIs and their helpers. Each agent shows the higher usage of its two quota windows.
+`~` means a local estimate, `*` means stale/cached account data, and `?` means missing data.
+A percentage followed by `?` means the other window is unknown; `-` means both windows are disabled.
+Unknown usage is never presented as 0%. The header reloads local data every three seconds; use
+`/u refresh` for a new account check. It uses up to three rows to fit narrow screens; `/u` shows all agents.
+
+While the header is enabled, typing survives background output. Arrow keys, Home/End, Delete,
+Backspace and session-only history work; long input scrolls horizontally. Bracketed multiline paste
+becomes a single message. Ctrl+C leaves a chat or exits from home, and terminal settings are restored.
+Turn progress prefixes are only a vendor-colored elapsed time such as `0:03`, without names or brackets.
+
+Redirected output and unsupported terminals keep ordinary input/output. Very small terminals
+(under 16 columns or four rows at startup) skip the header. To disable it explicitly, set
+`CONSOLEAGENTS_HEADER=0` before launching (`$env:CONSOLEAGENTS_HEADER='0'` in PowerShell,
+or `export CONSOLEAGENTS_HEADER=0` in Termux). `NO_COLOR` disables colors.
+
+The header/editor has been checked in a native Windows console and POSIX pseudoterminals in WSL,
+including background output, resize and Ctrl+C restoration. Actual Android/Termux execution has
+not yet been verified.
+
 ## Update the app and recover a previous version
 
 From the shell, run `/update --check` to fetch and display incoming commits, then `/update`

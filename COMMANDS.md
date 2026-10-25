@@ -535,10 +535,10 @@ When running inside the interactive `ca` console shell, the following commands a
 | `/continue [msg]` (`/c`) | `ca continue [-m "<msg>"]` | Continue current chat |
 | `/open <n\|proj#n>` (`/o`) | `ca open <n>` | Open and follow chat live |
 | `/back` (`/b`, `/home`) | - | Return home from open chat (chat keeps working) |
-| `/chats [all]` (`/ls`) | `ca chats [--all]` | List active and past chats |
+| `/chats [all] [--details]` (`/ls`) | `ca chats [--all] [--details]` | List chats; include hidden fields on narrow screens |
 | `/stop [n]` (`/x`) | `ca stop [n]` | Stop background chat |
 | `/rm <n...> [--done] [-y] [-f]` | `ca delete ...` | Delete chats |
-| `/ps [--all]` | `ca ps [--all]` | List running agent helper processes |
+| `/ps [--all] [--details]` | `ca ps [--all] [--details]` | List tracked processes; include hidden fields on narrow screens |
 | `/kill <pid...> \| all` (`/k`) | `ca kill ...` | Kill leftover processes |
 | `/status` (`/s`) | `ca status` | View chat status |
 | `/roadmap` (`/rd`) | `ca roadmap` | View roadmap |
@@ -555,3 +555,43 @@ When running inside the interactive `ca` console shell, the following commands a
 | `/cd <dir>` | - | Change working directory inside shell |
 | `/help` (`/?`) | - | Show command help |
 | `/quit` (`/q`) | - | Exit the interactive shell |
+
+### Narrow screens and pinned status
+
+The shell and CLI adapt to terminal width. Narrow usage lists show percentages instead of bars;
+chat lists omit update timestamps, and process lists omit agent, age and memory fields.
+`ca chats --details` / `/ls --details` and `ca ps --details` / `/ps --details` retain those fields
+in wrapped blocks. `ca usage show codex` / `/u show codex` includes reset times, report age,
+status and pacing. Desktop table columns remain available as before.
+
+Agent display labels are orange **Claude**, blue **Gemini** (`antigravity`) and gray **GPT** (`codex`).
+Use the original identifiers in command arguments and settings. Progress lines use only a
+vendor-colored elapsed time, for example `0:03`, followed by the message.
+
+The interactive shell and `ca open` pin local usage and tracked process count at the top of
+compatible ANSI terminals. The header refreshes from local files every three seconds without
+making account requests, and follows terminal resize and project switches. It may use up to
+three rows; very narrow/short screens may not fit every enabled agent. Use `/u` for the full list.
+
+| Header field | Meaning |
+|---|---|
+| `P:3` | Three unique live tracked processes across registered projects plus the current project, including agent CLIs and helpers; `P:?` means the count could not be read |
+| `42%` | Highest usage across the agent's two quota windows |
+| `42%~` | Local token estimate |
+| `42%*` | Stale or cached account report |
+| `?` | No usable usage data |
+| `42%?` | Known usage in one window; another window is unknown |
+| `-` | Both windows reported disabled |
+
+When pinned status is active, the shell editor redraws typed input after asynchronous output.
+Use arrows, Home/End, Delete and Backspace to edit; Up/Down recall this session's history,
+Ctrl+U clears the line, and Ctrl+D on an empty line exits. Long input scrolls horizontally.
+Bracketed multiline paste is submitted as one message, with newlines converted to spaces.
+Ctrl+C leaves an open chat or exits from home. The scroll region, paste mode and POSIX input
+settings are restored when the shell closes or raises an exception.
+
+Set `CONSOLEAGENTS_HEADER=0` before launching to keep ordinary console input/output.
+The header is also skipped when input/output is redirected, `TERM` is `dumb`/`unknown`, terminal
+capabilities are unavailable, or the startup size is under 16 columns/four rows. Colors honor
+`NO_COLOR`; pinning does not require colored text. Native Windows console and WSL POSIX PTY
+checks have passed; actual Android/Termux execution remains unverified.
