@@ -99,6 +99,13 @@ QUICK = [
 
 
 def quick_help(ui: UI, columns: int = 3) -> None:
+    if ui.narrow:
+        ui.line("<task> start · /o <n> open · /b back")
+        ui.line("/ls chats · /u usage · /ps processes")
+        ui.line("/update app · /rollback restore (/revert)")
+        ui.line("/help all commands · /q quit")
+        return
+    columns = max(1, min(columns, (ui.width - 2) // 30))
     cells = [c(f"{cmd:<9}", "bold", "cyan") + f"{desc:<20}" for cmd, desc in QUICK]
     for i in range(0, len(cells), columns):
         ui.line("  " + " ".join(cells[i:i + columns]).rstrip())
@@ -452,7 +459,14 @@ class Session:
                 and rest.split()[0] not in ("list", "ls", "add", "use", "remove", "rm", "rename", "mv", "info"):
             self.run_argv(["project", "use", rest])  # /p 2  or  /p shop
         elif word in ("chats", "ls"):
-            self.run_argv(["chats", *(["--all"] if rest.startswith("all") else [])])
+            try:
+                flags = split_args(rest)
+            except ValueError as exc:
+                self.ui.error(str(exc))
+                return True
+            if flags and flags[0] == "all":
+                flags[0] = "--all"
+            self.run_argv(["chats", *flags])
         elif word == "cd":
             new = Path(rest.strip('"')).expanduser()
             new = (self.root / new).resolve() if not new.is_absolute() else new.resolve()

@@ -271,13 +271,17 @@ def cmd_chats(args, ui: UI) -> int:
             mark = "*" if info.chat_id == current else " "
             ref = f"{name}#{info.number}" if args.all else f"#{info.number}"
             rows.append((info.updated, [f"{mark}{ref}", status_cell(info.status), agent_tag(info.agent) if info.agent else "-",
-                                        info.text[:60].replace("\n", " "), fmt_time(info.updated)]))
+                                        (info.text if ui.narrow else info.text[:60]).replace("\n", " "), fmt_time(info.updated)]))
     if not rows:
         ui.info('No chats yet. Start one: aa run "task" (or type a task in the shell).')
         return 0
     if args.all:
         rows.sort(key=lambda r: -r[0])
-    ui.table(["chat", "status", "agent", "task", "updated"], [r[1] for r in rows])
+    ui.table(["chat", "status", "agent", "task", "updated"], [r[1] for r in rows],
+             compact=None if getattr(args, "details", False) else [0, 1, 2, 3])
+    if ui.narrow:
+        ui.info("/o <n> open · /x <n> stop · /ls --details")
+        return 0
     ui.line(c("* = current chat. Open one: aa open <n> (shell: /open <n>); stop: aa stop <n>", "gray"))
     return 0
 
@@ -394,7 +398,11 @@ def cmd_ps(args, ui: UI) -> int:
                      kind, f"{age // 3600}h{age % 3600 // 60:02d}m" if age >= 3600 else f"{age // 60}m",
                      f"{d.get('mem', 0) / 1e6:.0f} MB" if d.get("mem") else "-",
                      procs.describe(str(d.get("cmd") or r.get("cmd") or ""), 70)])
-    ui.table(["pid", "name", "chat", "agent", "", "age", "memory", "command"], rows)
+    ui.table(["pid", "name", "chat", "agent", "", "age", "memory", "command"], rows,
+             compact=None if getattr(args, "details", False) else [0, 1, 2, 7])
+    if ui.narrow:
+        ui.info("/k <pid> kill · /ps --details")
+        return 0
     ui.line(c("Kill: aa kill <pid ...> | aa kill all [--all] | aa kill --chat <n> (shell: /kill ...)", "gray"))
     return 0
 
@@ -746,13 +754,19 @@ def cmd_usage(args, ui: UI) -> int:
         cells = [agent_tag(name)]
         for w in WINDOWS:
             wu = u.windows[w]
-            cells.append(usage_cell(wu, info))
+            cells.append(usage_cell(wu, info, short=ui.narrow and not args.agent, compact=ui.narrow))
             cells.append(fmt_in(wu.resets_at) if wu.resets_at and w not in info["disabled_windows"] else "-")
         cells.append(usage_updated(info))
         cells.append(state)
         cells.append(pace_cell(cfg, u, usable=acfg.get("enabled", True) and name in orch.installed))
         rows.append(cells)
-    ui.table(["agent", "5-hour", "resets", "weekly", "resets", "usage check", "status", "pace"], rows)
+    ui.table(["agent", "5-hour", "resets", "weekly", "resets", "usage check", "status", "pace"], rows,
+             compact=None if args.agent else [0, 1, 3, 6])
+    if ui.narrow and not args.agent:
+        ui.info("Details: /u show <agent> · refresh: /u refresh")
+    if ui.narrow:
+        ui.line("est = estimate · stale/cached = old · unknown = no data")
+        return 1 if refresh_failed else 0
     ui.line(c(f"\nsoft limit {cfg['balancer']['soft_limit']:.0%} (avoid), hard limit "
               f"{cfg['balancer']['hard_limit']:.0%} (never start). Source names identify account reports; "
               "est = local token estimate, manual = set by you. Reports include estimated local spend since observation.\n"
@@ -785,7 +799,7 @@ def usage_updated(info: dict) -> str:
     return _usage_age(max(stamps)) if stamps else "never"
 
 
-def usage_cell(wu, info: dict, short: bool = False) -> str:
+def usage_cell(wu, info: dict, short: bool = False, compact: bool = False) -> str:
     """Presentation only: retain the ledger's numeric values for balancing."""
     snap = info.get("snapshots", {}).get(wu.window)
     if wu.window in info.get("disabled_windows", []):
@@ -800,10 +814,10 @@ def usage_cell(wu, info: dict, short: bool = False) -> str:
         label = " cached" if cached else ""
         if not short:
             label += f" {wu.source} · {_usage_age(snap.get('observed_at') if snap else None)}"
-        return bar(wu.utilization, 8 if short else 12) + c(label, "yellow" if cached else "gray")
+        return (f"{wu.utilization:.0%}" if compact else bar(wu.utilization, 8 if short else 12)) + c(label, "yellow" if cached else "gray")
     if wu.tokens:
         label = " est" + (" (account stale)" if snap and not short else "")
-        return bar(wu.utilization, 8 if short else 12) + c(label, "gray")
+        return (f"{wu.utilization:.0%}" if compact else bar(wu.utilization, 8 if short else 12)) + c(label, "gray")
     if snap:
         label = f"{snap['utilization']:.0%} stale"
         if not short:
@@ -864,16 +878,19 @@ def compact_usage(root: Path, ui: UI) -> None:
         cells = [agent_tag(name)]
         for w in WINDOWS:
             wu = u.windows[w]
-            cells.append(usage_cell(wu, info, short=True))
+            cells.append(usage_cell(wu, info, short=True, compact=ui.narrow))
         cells.append(usage_updated(info))
         cells.append(agent_state(cfg, acfg, name, u, orch.installed, short=True))
         cells.append(pace_cell(cfg, u, short=True))
         rows.append(cells)
     if rows:
-        ui.table(["agent", "5-hour", "week", "usage check", "status", "pace"], rows)
+        ui.table(["agent", "5-hour", "week", "usage check", "status", "pace"], rows,
+                 compact=[0, 1, 2, 4])
     note = ("est = local estimate · unknown = no account data · refresh: /u refresh · details: /u"
             " · pace >x1 = preferred; <x1 = spared"
             + (f" · off: {', '.join(off)}" if off else ""))
+    if ui.narrow:
+        note = "est = estimate · unknown = no data · /u for details"
     ui.line(c(note, "gray"))
 
 
@@ -1124,6 +1141,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--all", action="store_true", help="chats of every project")
     sp.add_argument("-n", type=int, default=15, help="show the last N chats per project")
     sp.add_argument("--all-chats", action="store_true", help="no limit on the number of chats")
+    sp.add_argument("--details", action="store_true", help="include all fields on narrow screens")
     sp.set_defaults(func=cmd_chats)
 
     sp = sub.add_parser("open", aliases=["o"], help="watch a chat live and type into it")
@@ -1139,6 +1157,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("ps", aliases=["procs"], help="processes agents started that are still running")
     sp.add_argument("--all", action="store_true", help="every project")
+    sp.add_argument("--details", action="store_true", help="include all fields on narrow screens")
     sp.set_defaults(func=cmd_ps)
 
     sp = sub.add_parser("kill", aliases=["k"], help="kill processes agents started (see ca ps)")
