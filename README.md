@@ -253,6 +253,10 @@ the two actions on and off.
 **Projects.** A project is a folder with a name. Its chats, roadmaps, logs and project memory are kept in
 its `.autoagents/`, so each project has its own work. A folder becomes a project the first time you run a task
 in it (named after the folder), or with `ca project add shop W:\code\shop -d "web shop"`.
+Give a git address instead of a folder and it is cloned first: `ca project add https://github.com/me/shop.git`
+clones into `./shop` and names the project `shop`; `ca project add https://github.com/me/shop.git W:\code` clones into
+`W:\code\shop` (a new or empty folder is used as is); `ca project add web git@github.com:me/shop.git W:\code\web`
+picks the name too. A folder that already is a clone of that repository is added without cloning again.
 `ca project list` (`ca p`) shows them **numbered** (in the order they were added, so numbers do not move when
 you use a project) with their chats. Everywhere a project is asked for, a number works like the name, and so does
 a unique start of the name: `ca -P 2 status`, `ca s 2#3` (chat 3 of project 2), `/p 2` or `/p shop` in the shell

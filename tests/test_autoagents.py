@@ -538,6 +538,48 @@ class ProjectsMemorySettings(TempCase):
         with self.assertRaises(SystemExit):
             self.cli("-P", "nope", "status")
 
+    def test_project_add_clones_a_git_url(self):
+        import subprocess
+        from autoagents.registry import Registry, same_path
+        def git(*a, cwd):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=str(cwd),
+                           check=True, capture_output=True)
+        git("init", "-b", "main", cwd=self.project)
+        (self.project / "a.txt").write_text("1", encoding="utf-8")
+        git("add", "a.txt", cwd=self.project)
+        git("commit", "-m", "first", cwd=self.project)
+        bare = self.dir / "shop.git"
+        git("clone", "--bare", str(self.project), str(bare), cwd=self.dir)
+        url = bare.as_uri()
+        work = self.dir / "work"
+        work.mkdir()
+        (work / "note.txt").write_text("x", encoding="utf-8")
+        old_cwd = os.getcwd()
+        os.chdir(work)
+        try:
+            # add <url>: named after the repository, cloned into ./shop
+            self.assertEqual(self.cli("project", "add", url), 0)
+            self.assertTrue((work / "shop" / "a.txt").is_file())
+            self.assertTrue(same_path(Registry().get("shop")["path"], work / "shop"))
+            # The name is taken now; the clone is not started.
+            with self.assertRaises(SystemExit):
+                self.cli("project", "add", url)
+            # add <name> <url> <new folder>: cloned exactly there
+            self.assertEqual(self.cli("project", "add", "shop2", url, str(self.dir / "new" / "here")), 0)
+            self.assertTrue((self.dir / "new" / "here" / "a.txt").is_file())
+            # add <url> <non-empty folder>: cloned into folder/<repo>
+            Registry().remove("shop")
+            self.assertEqual(self.cli("project", "add", url, str(work)), 0)  # existing clone kept as is
+            self.assertTrue(same_path(Registry().get("shop")["path"], work / "shop"))
+            # A plain bare-repo path works like a URL, and a failed clone registers nothing.
+            self.assertEqual(self.cli("project", "add", "plain", str(bare), str(self.dir / "plain")), 0)
+            self.assertTrue((self.dir / "plain" / "a.txt").is_file())
+            with self.assertRaises(SystemExit):
+                self.cli("project", "add", "broken", (self.dir / "missing.git").as_uri())
+            self.assertIsNone(Registry().get("broken"))
+        finally:
+            os.chdir(old_cwd)
+
     def test_agents_read_and_write_memory(self):
         from autoagents.memory import global_memory, project_memory
         global_memory().add("The user works on Windows 11", by="user")

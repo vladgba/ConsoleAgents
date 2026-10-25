@@ -25,6 +25,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -36,7 +38,7 @@ from .config import (PROJECT_DIRNAME, WINDOWS, check_value, flatten, get_key, gl
 from .memory import global_memory, project_memory
 from .orchestrator import Orchestrator
 from .project import ProjectState
-from .registry import Registry, same_path
+from .registry import NAME_RE, Registry, same_path
 from .ui import UI, agent_tag, bar, c, fmt_in, fmt_time
 from .usage import UsageStore
 
@@ -921,6 +923,77 @@ def cmd_config(args, ui: UI) -> int:
 
 
 # -- projects, memory, settings -----------------------------------------------------------------------
+_GIT_URL_RE = re.compile(r"^(?:(?:https?|ssh|git|file)://|[\w.-]+@[\w.-]+:)")
+
+
+def _is_git_url(s) -> bool:
+    """A git address (https://, ssh://, git://, file://, git@host:owner/repo or a path to a bare *.git repo)."""
+    if not s:
+        return False
+    if _GIT_URL_RE.match(s):
+        return True
+    if s.rstrip("/\\").endswith(".git"):
+        p = Path(s).expanduser()
+        return not p.exists() or ((p / "HEAD").is_file() and (p / "objects").is_dir())
+    return False
+
+
+def _repo_name(url: str) -> str:
+    """The repository's name from its address: https://github.com/u/shop.git -> shop."""
+    base = re.split(r"[/\\:]", url.rstrip("/\\"))[-1]
+    return base[:-4] if base.endswith(".git") else base
+
+
+def _origin_of(folder: Path) -> str | None:
+    try:
+        out = subprocess.run(["git", "-C", str(folder), "config", "--get", "remote.origin.url"],
+                             capture_output=True, text=True)
+    except OSError:
+        return None
+    return (out.stdout.strip() or None) if out.returncode == 0 else None
+
+
+def _same_remote(a: str, b: str) -> bool:
+    def norm(u):
+        u = u.strip().rstrip("/\\")
+        u = u[:-4] if u.endswith(".git") else u
+        if not _GIT_URL_RE.match(u):  # a local path
+            return os.path.normcase(str(Path(u).expanduser().resolve()))
+        return u.lower()
+    return norm(a) == norm(b)
+
+
+def _clone_target(url: str, where) -> Path:
+    """Where `aa project add <url> [dir]` clones to: a new or empty `dir` itself, else `dir/<repo>` (default: ./<repo>)."""
+    repo = _repo_name(url)
+    if not where:
+        return Path.cwd().resolve() / repo
+    p = Path(where).expanduser().resolve()
+    if not p.exists() or (p.is_dir() and not any(p.iterdir())):
+        return p
+    if not p.is_dir():
+        raise SystemExit(f"Not a directory: {p}")
+    origin = _origin_of(p) if (p / ".git").exists() else None
+    return p if origin and _same_remote(origin, url) else p / repo
+
+
+def _clone_project(url: str, target: Path, ui: UI) -> None:
+    """Clone `url` into `target`, or keep `target` if it already is a checkout of `url`."""
+    if target.exists() and any(target.iterdir()):
+        origin = _origin_of(target) if (target / ".git").exists() else None
+        if origin and _same_remote(origin, url):
+            ui.info(f"{target} is already a clone of {url}; adding it as is.")
+            return
+        raise SystemExit(f"{target} already exists and is not a clone of {url}. Give another folder.")
+    ui.info(f"Cloning {url} into {target} ...")
+    try:
+        done = subprocess.run(["git", "clone", *(["-q"] if ui.quiet else []), "--", url, str(target)])
+    except OSError as exc:
+        raise SystemExit(f"Cannot run git: {exc}. Install git to add projects from a repository.")
+    if done.returncode != 0:
+        raise SystemExit(f"git clone failed (exit code {done.returncode}); the project was not added.")
+
+
 def cmd_project(args, ui: UI) -> int:
     reg = Registry()
     action = args.action or "list"
@@ -928,7 +1001,7 @@ def cmd_project(args, ui: UI) -> int:
         if action in ("list", "ls"):
             projects = reg.all()
             if not projects:
-                ui.info("No projects yet. Add one with: aa project add <name> [path]  "
+                ui.info("No projects yet. Add one with: aa project add <name> [path] (or a git URL to clone)  "
                         "(a folder also becomes a project the first time you run a task in it)")
                 return 0
             cur = reg.current()
@@ -952,8 +1025,29 @@ def cmd_project(args, ui: UI) -> int:
                       "/open 2#3 (chat 3 of project 2)", "gray"))
         elif action == "add":
             if not args.name:
-                raise SystemExit("Usage: aa project add <name> [path] [-d description]")
-            root = Path(args.path).expanduser().resolve() if args.path else Path.cwd().resolve()
+                raise SystemExit("Usage: aa project add <name> [path] [-d description]\n"
+                                 "       aa project add [name] <git-url> [folder]   (clones the repository)")
+            if _is_git_url(args.name) or _is_git_url(args.path):
+                if _is_git_url(args.name):  # add <url> [folder]
+                    url, where = args.name, args.path
+                    name = _repo_name(url)
+                    if args.dir:
+                        raise SystemExit("Usage: aa project add [name] <git-url> [folder]")
+                else:  # add <name> <url> [folder]
+                    url, name, where = args.path, args.name, args.dir
+                if not NAME_RE.match(name or ""):
+                    raise SystemExit(f"Cannot use {name!r} as a project name; give one: "
+                                     f"aa project add <name> {url} [folder]")
+                if name in reg.all():
+                    raise SystemExit(f"A project named {name!r} already exists ({reg.all()[name]['path']}). "
+                                     f"Give another name: aa project add <name> {url} [folder]")
+                root = _clone_target(url, where)
+                _clone_project(url, root, ui)
+                args.name = name
+            else:
+                if args.dir:
+                    raise SystemExit("Usage: aa project add <name> [path] [-d description]")
+                root = Path(args.path).expanduser().resolve() if args.path else Path.cwd().resolve()
             reg.add(args.name, root, args.description or "")
             ui.ok(f"Project {args.name!r} -> {root}")
         elif action == "use":
@@ -1203,7 +1297,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("project", aliases=["projects", "p"], help="list / add / use / remove projects")
     sp.add_argument("action", nargs="?", choices=["list", "ls", "add", "use", "remove", "rm", "rename", "mv", "info"])
     sp.add_argument("name", nargs="?")
-    sp.add_argument("path", nargs="?", help="folder for add (default: current), new name for rename")
+    sp.add_argument("path", nargs="?", help="folder for add (default: current) or a git URL to clone, "
+                                            "new name for rename")
+    sp.add_argument("dir", nargs="?", help="add <name> <git-url> <folder>: where to clone")
     sp.add_argument("-d", "--description")
     sp.set_defaults(func=cmd_project)
 

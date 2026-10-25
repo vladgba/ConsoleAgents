@@ -364,6 +364,13 @@ ca rm [chat_refs...] [options]
   ca p add api W:\code\api
   ca p add . -d "Current working directory"
   ```
+* **Add a project by cloning a git repository** (https://, ssh://, git://, file://, `git@host:owner/repo` or a bare `*.git` path):
+  ```bash
+  ca p add https://github.com/me/shop.git                  # clones into ./shop, project "shop"
+  ca p add https://github.com/me/shop.git W:\code          # W:\code is not empty: clones into W:\code\shop
+  ca p add web git@github.com:me/shop.git W:\code\web      # own name; a new or empty folder is used as is
+  ```
+  A folder that already is a clone of the same repository is registered without cloning again.
 * **Switch default project:**
   ```bash
   ca p use shop
