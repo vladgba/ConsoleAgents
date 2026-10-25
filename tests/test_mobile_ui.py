@@ -155,3 +155,65 @@ class MobileUITests(unittest.TestCase):
                 self.assert_fits(ui, out, 39)
                 detailed = self.capture(lambda: cli.cmd_chats(parser.parse_args(['chats', '--details']), ui.UI()))
                 self.assertIn('updated:', detailed)
+
+    def test_turn_started_process_shows_only_command_line(self):
+        for pkg_name in ('consoleagents', 'autoagents'):
+            with self.subTest(package=pkg_name):
+                orch_mod = importlib.import_module(f'{pkg_name}.orchestrator')
+                procs_mod = importlib.import_module(f'{pkg_name}.procs')
+                ui_mod = importlib.import_module(f'{pkg_name}.ui')
+
+                emitted = []
+                fake_ui = ui_mod.UI(quiet=False)
+                fake_ui.line = lambda text: emitted.append(text)
+
+                class MockProvider:
+                    def run(self, prompt, cwd, progress, timeout, resume=None, on_procs=None):
+                        if on_procs:
+                            on_procs([object()], 99999)
+                        return SimpleNamespace(
+                            tokens=100, snapshots=[], log=[], duration_s=1.0,
+                            error=None, error_kind=None, status='done', cost_usd=None
+                        )
+
+                rec = {
+                    'agent_cli': False,
+                    'name': 'python.exe',
+                    'pid': 12345,
+                    'cmd': r'"C:\Python315\python.exe" -m unittest discover',
+                }
+
+                orch = orch_mod.Orchestrator.__new__(orch_mod.Orchestrator)
+                orch.ui = fake_ui
+                orch.providers = {'codex': MockProvider()}
+                orch.cfg = {'agents': {'codex': {'type': 'codex'}}}
+                orch.run_cfg = {}
+                orch.state = SimpleNamespace(
+                    add_transcript=lambda *a, **kw: None,
+                    dir=Path('fake'),
+                    number=lambda: 1,
+                    chat_id='chat1',
+                )
+                orch.store = SimpleNamespace(
+                    record_tokens=lambda *a: None,
+                    set_snapshot=lambda *a, **kw: None,
+                    agent_usage=lambda *a, **kw: SimpleNamespace(utilization=0.5, worst_window=None),
+                )
+                orch.root = Path('fake')
+                orch._leftovers = lambda *a: None
+
+                with patch.object(orch_mod.busy_mod, 'mark', return_value=None), \
+                     patch.object(orch_mod.busy_mod, 'unmark', return_value=None), \
+                     patch.object(procs_mod, 'record', return_value=[
+                         dict(rec, agent_cli=True, cmd='AGENT_CLI'), rec,
+                         dict(rec, cmd='', name='worker')]):
+                    orch._run_agent('codex', 'hello', 1, 'turn')
+
+                self.assertEqual(ui_mod.ANSI.sub('', emitted[0]).split(' ', 1)[1],
+                                 'python -m unittest discover')
+                self.assertEqual(ui_mod.ANSI.sub('', emitted[1]).split(' ', 1)[1], 'worker')
+                for line in emitted:
+                    self.assertNotIn('⚙ started', line)
+                    self.assertNotIn('process started', line)
+                    self.assertNotIn('AGENT_CLI', line)
+                    self.assertNotIn('12345', line)

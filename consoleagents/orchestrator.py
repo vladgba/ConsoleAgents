@@ -262,8 +262,9 @@ class Orchestrator:
         def on_procs(found, cli_pid):
             for rec in procs_mod.record(self.state.dir, found, name, turn, cli_pid):
                 if not rec["agent_cli"]:
-                    what = procs_mod.describe(rec.get("cmd") or "")
-                    progress(f"⚙ started {rec['name']} (pid {rec['pid']})" + (f": {what}" if what else ""))
+                    cmd = procs_mod.describe(rec.get("cmd") or "") or rec.get("name", "")
+                    if cmd:
+                        progress(cmd)
 
         try:
             res = provider.run(prompt, self.root, progress, timeout, resume=resume, on_procs=on_procs)
