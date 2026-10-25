@@ -474,6 +474,167 @@ def cmd_push(args, ui: UI) -> int:
     return 0 if res.ok else 1
 
 
+def cmd_update(args, ui: UI) -> int:
+    """Update ConsoleAgents from GitHub or check for updates."""
+    from . import updater
+
+    root = updater.get_app_root()
+    if not updater.is_git_repo(root):
+        ui.error(f"Cannot update: '{root}' is not a git repository.")
+        return 1
+
+    if getattr(args, "rollback", False):
+        return cmd_rollback(args, ui)
+
+    fetch = not getattr(args, "no_fetch", False)
+    status = updater.check_update(root, fetch=fetch)
+
+    if status.error:
+        ui.warn(status.error)
+        return 1
+
+    ui.info(f"ConsoleAgents repository: {root}")
+    ui.info(f"Current version: {status.short_commit} on branch '{status.branch}'")
+    if status.remote_url:
+        ui.info(f"Remote: {status.remote_url}")
+
+    if getattr(args, "check", False):
+        if status.dirty:
+            ui.warn("Working directory has uncommitted local changes.")
+        if status.has_update:
+            ui.warn(f"Update available: {status.behind} new commit(s) on remote '{status.remote}/{status.branch}'.")
+            if status.incoming_commits:
+                rows = [[c["short"], c["date"], c["author"][:15], c["subject"][:55]] for c in status.incoming_commits]
+                ui.table(["commit", "date", "author", "message"], rows)
+        else:
+            ui.ok(f"ConsoleAgents is up to date with {status.remote}/{status.branch}.")
+        return 0
+
+    if not status.has_update and not getattr(args, "target", None):
+        ui.ok(f"ConsoleAgents is already up to date ({status.short_commit}).")
+        return 0
+
+    if status.has_update:
+        ui.info(f"Found {status.behind} new commit(s) from GitHub:")
+        if status.incoming_commits:
+            rows = [[c["short"], c["date"], c["author"][:15], c["subject"][:55]] for c in status.incoming_commits]
+            ui.table(["commit", "date", "author", "message"], rows)
+
+    allow_dirty = getattr(args, "allow_dirty", False)
+    if status.dirty and not allow_dirty:
+        ui.error("Working directory has uncommitted changes. Stash or commit them before updating (or pass --allow-dirty).")
+        return 1
+
+    if not getattr(args, "yes", False):
+        target_name = getattr(args, "target", None) or f"{status.remote}/{status.branch} (+{status.behind} commits)"
+        try:
+            ans = input(f"Apply update to {target_name}? [y/N] ").strip().lower()
+        except EOFError:
+            ui.error("Add -y / --yes to apply updates without interactive confirmation.")
+            return 1
+        if ans != "y":
+            ui.info("Update cancelled.")
+            return 0
+
+    res = updater.apply_update(root, target=getattr(args, "target", None), allow_dirty=allow_dirty)
+    if not res.ok:
+        ui.error(res.message)
+        return 1
+
+    ui.ok(res.message)
+    if res.checkpoint:
+        ui.info(f"Backup checkpoint saved: {res.checkpoint.short_commit} (use `ca rollback` if you need to revert).")
+    return 0
+
+
+def cmd_rollback(args, ui: UI) -> int:
+    """Revert ConsoleAgents to a previous checkpoint or commit (fallback interface)."""
+    from . import updater
+
+    root = updater.get_app_root()
+    if not updater.is_git_repo(root):
+        ui.error(f"Cannot rollback: '{root}' is not a git repository.")
+        return 1
+
+    checkpoints = updater.load_checkpoints(root)
+    cur_commit = updater.get_current_commit(root)
+
+    if getattr(args, "list", False):
+        if not checkpoints:
+            ui.info("No saved update checkpoints found.")
+            return 0
+        ui.header("Update & Rollback Checkpoints")
+        rows = []
+        for i, cp in enumerate(reversed(checkpoints), 1):
+            is_head = " (HEAD)" if cp.commit == cur_commit else ""
+            rows.append([str(i), cp.short_commit + is_head, cp.iso_time or "-", cp.action, cp.message[:50]])
+        ui.table(["#", "commit", "date", "action", "summary"], rows)
+        return 0
+
+    target = getattr(args, "target", None) or getattr(args, "checkpoint_ref", None)
+
+    # If no target specified, show the interactive fallback interface
+    if not target:
+        if not checkpoints:
+            ui.error("No saved checkpoints found in history to roll back to. Specify a commit hash explicitly (e.g. ca rollback <commit>).")
+            return 1
+
+        ui.header("Rollback Interface (Available Checkpoints)")
+        rows = []
+        rev_cp = list(reversed(checkpoints))
+        for i, cp in enumerate(rev_cp, 1):
+            is_head = " (HEAD)" if cp.commit == cur_commit else ""
+            rows.append([str(i), cp.short_commit + is_head, cp.iso_time or "-", cp.action, cp.message[:50]])
+        ui.table(["#", "commit", "date", "action", "summary"], rows)
+        ui.line()
+
+        if not getattr(args, "yes", False):
+            try:
+                choice = input(f"Select checkpoint to restore [1-{len(rev_cp)}], or 'q' to cancel: ").strip()
+            except EOFError:
+                ui.error("Interactive terminal required, or specify target (e.g. `ca rollback 1 -y`).")
+                return 1
+            if not choice or choice.lower() in ("q", "quit", "exit"):
+                ui.info("Rollback cancelled.")
+                return 0
+            if not choice.isdigit() or not (1 <= int(choice) <= len(rev_cp)):
+                ui.error(f"Invalid selection: '{choice}'. Expected number between 1 and {len(rev_cp)}.")
+                return 1
+            selected = rev_cp[int(choice) - 1]
+            target = selected.commit
+            prompt_name = f"#{choice} ({selected.short_commit} - {selected.message[:40]})"
+        else:
+            # -y without target defaults to most recent checkpoint (1)
+            selected = rev_cp[0]
+            target = selected.commit
+            prompt_name = f"#1 ({selected.short_commit} - {selected.message[:40]})"
+    else:
+        prompt_name = str(target)
+
+    allow_dirty = getattr(args, "allow_dirty", False)
+    if updater.is_dirty(root) and not allow_dirty:
+        ui.error("Working directory has uncommitted changes. Stash or commit them before rollback (or pass --allow-dirty).")
+        return 1
+
+    if not getattr(args, "yes", False):
+        try:
+            confirm = input(f"Revert ConsoleAgents working tree to {prompt_name}? [y/N] ").strip().lower()
+        except EOFError:
+            ui.error("Add -y to revert without interactive confirmation.")
+            return 1
+        if confirm != "y":
+            ui.info("Rollback cancelled.")
+            return 0
+
+    res = updater.apply_rollback(root, target=str(target), allow_dirty=allow_dirty)
+    if not res.ok:
+        ui.error(res.message)
+        return 1
+
+    ui.ok(res.message)
+    return 0
+
+
 def cmd_stop(args, ui: UI) -> int:
     state = _state(args)
     if not state.chat_id:
@@ -916,7 +1077,7 @@ def cmd_settings(args, ui: UI) -> int:
 # -- parser ---------------------------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ca", description="Console Agents: Claude / Codex / Antigravity relay for your "
-                                "projects. Short aliases: r c ls o x rm k s rd l u a p m st cf.")
+                                "projects. Short aliases: r c ls o x rm k s rd l u a p m st cf up rb.")
     p.add_argument("--version", action="version", version=f"consoleagents {__version__}")
     p.add_argument("-C", "--dir", help="project directory (default: current directory)")
     p.add_argument("-P", "--project", help="a registered project, by number or name (see ca project list)")
@@ -1048,6 +1209,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--global", dest="glob", action="store_true", help="the global file instead of the project one")
     sp.add_argument("--show", action="store_true", help="print the effective config")
     sp.set_defaults(func=cmd_config)
+
+    sp = sub.add_parser("update", aliases=["up", "upgrade"], help="update ConsoleAgents from GitHub or check for updates")
+    sp.add_argument("--check", "-c", action="store_true", help="check if updates are available without applying")
+    sp.add_argument("--target", help="target commit, branch, or tag to update to")
+    sp.add_argument("--rollback", "-r", action="store_true", help="switch to rollback mode")
+    sp.add_argument("--allow-dirty", action="store_true", help="allow updating even if local changes exist")
+    sp.add_argument("-y", "--yes", action="store_true", help="apply update without asking for confirmation")
+    sp.set_defaults(func=cmd_update)
+
+    sp = sub.add_parser("rollback", aliases=["revert", "rb"], help="revert ConsoleAgents to a previous checkpoint")
+    sp.add_argument("checkpoint_ref", nargs="?", help="checkpoint index (1 = latest), id, or commit hash")
+    sp.add_argument("--target", help="target commit, branch, or tag")
+    sp.add_argument("-l", "--list", action="store_true", help="list saved checkpoints and exit")
+    sp.add_argument("--allow-dirty", action="store_true", help="allow rollback even if local changes exist")
+    sp.add_argument("-y", "--yes", action="store_true", help="revert without confirmation prompt")
+    sp.set_defaults(func=cmd_rollback)
     return p
 
 

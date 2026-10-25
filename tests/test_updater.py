@@ -184,5 +184,125 @@ class TestUpdater(unittest.TestCase):
         self.assertEqual(updater.get_current_commit(self.app_dir), c2)
 
 
+class TestCLIUpdater(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import patch
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve()
+        self.app_dir = self.root / "app"
+        self.app_dir.mkdir(parents=True, exist_ok=True)
+        self.remote_dir = self.root / "remote.git"
+
+        # Bare remote
+        subprocess.run(["git", "init", "--bare", "-b", "main", str(self.remote_dir)], check=True, capture_output=True)
+        # App repo
+        self._git("init", "-b", "main")
+        self._git("remote", "add", "origin", str(self.remote_dir))
+        (self.app_dir / "ca.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        (self.app_dir / "version.txt").write_text("v1.0.0\n", encoding="utf-8")
+        self._git("add", ".")
+        self._git("commit", "-m", "Initial commit v1.0.0")
+        self._git("push", "-u", "origin", "main")
+
+        # Set env so CLI operates on self.app_dir
+        os.environ["CONSOLEAGENTS_APP_ROOT"] = str(self.app_dir)
+
+    def tearDown(self):
+        if "CONSOLEAGENTS_APP_ROOT" in os.environ:
+            del os.environ["CONSOLEAGENTS_APP_ROOT"]
+        try:
+            self.temp_dir.cleanup()
+        except OSError:
+            pass
+
+    def _git(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        target = cwd or self.app_dir
+        r = subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", *args],
+            cwd=str(target),
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(f"git command failed: git {' '.join(args)}\nstdout: {r.stdout}\nstderr: {r.stderr}")
+        return r
+
+    def test_cli_update_check(self):
+        from consoleagents.cli import main
+        code = main(["update", "--check"])
+        self.assertEqual(code, 0)
+
+    def test_cli_update_apply(self):
+        from consoleagents.cli import main
+        c1 = updater.get_current_commit(self.app_dir)
+
+        # Push update to remote via clone
+        clone_dir = self.root / "other_clone"
+        subprocess.run(["git", "clone", "-b", "main", str(self.remote_dir), str(clone_dir)], check=True, capture_output=True)
+        (clone_dir / "version.txt").write_text("v1.0.1\n", encoding="utf-8")
+        self._git("commit", "-am", "Release v1.0.1", cwd=clone_dir)
+        self._git("push", "origin", "main", cwd=clone_dir)
+
+        # Run ca update with -y
+        code = main(["update", "-y"])
+        self.assertEqual(code, 0)
+        c2 = updater.get_current_commit(self.app_dir)
+        self.assertNotEqual(c1, c2)
+        self.assertEqual((self.app_dir / "version.txt").read_text(encoding="utf-8").strip(), "v1.0.1")
+
+    def test_cli_rollback_list_and_apply(self):
+        from unittest.mock import patch
+        from consoleagents.cli import main
+        c1 = updater.get_current_commit(self.app_dir)
+        cp1 = updater.save_checkpoint(self.app_dir, action="pre_update")
+
+        (self.app_dir / "version.txt").write_text("v1.1.0\n", encoding="utf-8")
+        self._git("commit", "-am", "Update 2")
+        c2 = updater.get_current_commit(self.app_dir)
+        cp2 = updater.save_checkpoint(self.app_dir, action="pre_update")
+
+        # Test listing checkpoints
+        code = main(["rollback", "--list"])
+        self.assertEqual(code, 0)
+
+        # Test rollback by index with -y
+        # rev_cp: [cp2, cp1]. Index 2 is cp1 (c1)
+        code = main(["rollback", "2", "-y"])
+        self.assertEqual(code, 0)
+        self.assertEqual(updater.get_current_commit(self.app_dir), c1)
+
+    def test_cli_rollback_interactive(self):
+        from unittest.mock import patch
+        from consoleagents.cli import main
+        c1 = updater.get_current_commit(self.app_dir)
+        cp1 = updater.save_checkpoint(self.app_dir, action="pre_update")
+
+        (self.app_dir / "version.txt").write_text("v1.1.0\n", encoding="utf-8")
+        self._git("commit", "-am", "Update 2")
+
+        # Mock interactive selection: choose checkpoint 1, then confirm with 'y'
+        with patch("builtins.input", side_effect=["1", "y"]):
+            code = main(["rollback"])
+            self.assertEqual(code, 0)
+            self.assertEqual(updater.get_current_commit(self.app_dir), c1)
+
+    def test_cli_rollback_cancel(self):
+        from unittest.mock import patch
+        from consoleagents.cli import main
+        c1 = updater.get_current_commit(self.app_dir)
+        cp1 = updater.save_checkpoint(self.app_dir, action="pre_update")
+
+        (self.app_dir / "version.txt").write_text("v1.1.0\n", encoding="utf-8")
+        self._git("commit", "-am", "Update 2")
+        c2 = updater.get_current_commit(self.app_dir)
+
+        # User chooses 'q' to cancel
+        with patch("builtins.input", side_effect=["q"]):
+            code = main(["rollback"])
+            self.assertEqual(code, 0)
+            # Working tree commit should remain at c2
+            self.assertEqual(updater.get_current_commit(self.app_dir), c2)
+
+
 if __name__ == "__main__":
     unittest.main()
