@@ -32,7 +32,9 @@ class MobileUITests(unittest.TestCase):
                                            ('antigravity', 'Gemini', '34'), ('codex', 'GPT', '90')]:
                     self.assertEqual(ui.agent_tag(name), f'\033[1;{color}m{label}\033[0m')
                     out = self.capture(lambda: ui.UI().progress_printer(name)('working'))
-                    self.assertIn('[' + label, out)
+                    self.assertIn(f'\033[{color}m0:00 ', out)
+                    self.assertNotIn('[', ui.ANSI.sub('', out))
+                    self.assertNotIn(label, out)
                 self.assertIn('custom-provider', ui.agent_tag('custom-provider'))
             with patch.object(ui, '_COLOR', False):
                 self.assertEqual(ui.agent_tag('codex'), 'GPT')

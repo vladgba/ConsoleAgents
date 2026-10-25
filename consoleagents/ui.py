@@ -149,7 +149,7 @@ class UI:
             if self.quiet:
                 return
             el = int(time.time() - start)
-            self.line(c(f"  [{AGENT_NAMES.get(agent, agent)} {el // 60:02d}:{el % 60:02d}] ", AGENT_COLORS.get(agent, "cyan")) + msg)
+            self.line(c(f"{el // 60}:{el % 60:02d} ", AGENT_COLORS.get(agent, "cyan")) + msg)
 
         return emit
 
