@@ -70,6 +70,15 @@ def _tool_summary(name: str, args: dict | None) -> str:
     return name
 
 
+def _tool_display(summary: str) -> str:
+    """Compact UI labels; transcripts retain tool identifiers for handovers."""
+    name, separator, argument = summary.partition(": ")
+    icon = {"read_file": "📄👁", "run_command": ">_"}.get(name)
+    if icon:
+        return icon + (" " + argument if separator else "")
+    return "🔧 " + summary
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
@@ -352,7 +361,7 @@ class ClaudeProvider(Provider):
                 elif part.get("type") == "tool_use":
                     summary = _tool_summary(part.get("name", "tool"), part.get("input"))
                     res.log.append(f"[tool] {summary}")
-                    emit("🔧 " + summary)
+                    emit(_tool_display(summary))
         elif kind == "rate_limit_event":
             info = ev.get("rate_limit_info") or {}
             for wname, w in (info.get("unifiedWindows") or {}).items():
@@ -558,7 +567,7 @@ class AntigravityProvider(Provider):
                 info = su.get("tool_info") or {}
                 summary = _tool_summary(info.get("name") or su.get("tool_name") or "tool", info.get("parameters"))
                 res.log.append(f"[tool] {summary}")
-                emit("🔧 " + summary)
+                emit(_tool_display(summary))
         elif kind == "result":
             r = ev.get("result") or {}
             for idx in sorted(self._texts):  # text that never got a DONE state
